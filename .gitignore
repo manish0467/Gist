@@ -3,3 +3,4 @@ pkgbuild/pkg/
 pkgbuild/src/
 *.pkg.tar.*
 .qmake.stash
+core/target/

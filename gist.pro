@@ -4,6 +4,10 @@ CONFIG += c++17 release
 TARGET = gist
 TEMPLATE = app
 
+INCLUDEPATH += core/include
+LIBS += -L$$PWD/core/target/release -lgist_core -lssl -lcrypto
+QMAKE_RPATHDIR += $$PWD/core/target/release
+
 HEADERS += \
     src/backend.h \
     src/theme.h \

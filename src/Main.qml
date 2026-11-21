@@ -19,8 +19,8 @@ ApplicationWindow {
 
     property bool helpVisible: false
     property bool composeVisible: false
+    property bool addAccountVisible: false
 
-    // Application Shortcuts
     Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; onActivated: win.helpVisible = !win.helpVisible }
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
     Shortcut { sequence: "J"; context: Qt.ApplicationShortcut; onActivated: backend.nextThread() }
@@ -47,14 +47,14 @@ ApplicationWindow {
             // PANE 1: Left Navigation Sidebar
             // -------------------------------------------------------------
             Rectangle {
-                Layout.preferredWidth: 210
+                Layout.preferredWidth: 220
                 Layout.fillHeight: true
                 color: "#17181c"
 
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: 14
-                    spacing: 16
+                    spacing: 14
 
                     // App Title & Brand
                     RowLayout {
@@ -77,6 +77,14 @@ ApplicationWindow {
                             font.bold: true
                             font.pixelSize: 18
                             color: "#ffffff"
+                        }
+                        Item { Layout.fillWidth: true }
+                        ToolButton {
+                            text: "⚙"
+                            font.pixelSize: 15
+                            ToolTip.visible: hovered
+                            ToolTip.text: qsTr("Add IMAP Account")
+                            onClicked: win.addAccountVisible = true
                         }
                     }
 
@@ -157,6 +165,32 @@ ApplicationWindow {
                     }
 
                     Item { Layout.fillHeight: true }
+
+                    // Sync & Status Indicator
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 38
+                        radius: 6
+                        color: Qt.rgba(255, 255, 255, 0.04)
+                        border.color: backend.isSyncing ? theme.accent : "transparent"
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 6
+                            spacing: 8
+                            Text {
+                                text: backend.isSyncing ? "🔄" : "⚡"
+                                font.pixelSize: 12
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                text: backend.statusMessage || qsTr("Rust IMAP Core Idle")
+                                font.pixelSize: 10
+                                color: "#8a8f9d"
+                                elide: Text.ElideRight
+                            }
+                        }
+                    }
 
                     // Keyboard Hint
                     Rectangle {
@@ -598,6 +632,84 @@ ApplicationWindow {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------
+    // Add IMAP Account Dialog
+    // -------------------------------------------------------------
+    Dialog {
+        id: addAccountDialog
+        visible: win.addAccountVisible
+        anchors.centerIn: parent
+        width: 440
+        title: qsTr("Connect Real IMAP Account")
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+
+        onAccepted: {
+            if (accEmail.text.length > 0 && accHost.text.length > 0) {
+                backend.addAccount(
+                    "acc_" + Date.now(),
+                    accName.text.length > 0 ? accName.text : accEmail.text,
+                    accEmail.text,
+                    accHost.text,
+                    parseInt(accPort.text) || 993,
+                    accUser.text.length > 0 ? accUser.text : accEmail.text,
+                    accPass.text
+                )
+            }
+            win.addAccountVisible = false
+        }
+        onRejected: win.addAccountVisible = false
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            TextField {
+                id: accName
+                Layout.fillWidth: true
+                placeholderText: "Account Label (e.g. Work, Personal)"
+                selectByMouse: true
+            }
+            TextField {
+                id: accEmail
+                Layout.fillWidth: true
+                placeholderText: "Email Address (e.g. user@gmail.com)"
+                selectByMouse: true
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                TextField {
+                    id: accHost
+                    Layout.fillWidth: true
+                    placeholderText: "IMAP Server (e.g. imap.gmail.com)"
+                    text: "imap.gmail.com"
+                    selectByMouse: true
+                }
+                TextField {
+                    id: accPort
+                    Layout.preferredWidth: 80
+                    placeholderText: "Port"
+                    text: "993"
+                    selectByMouse: true
+                }
+            }
+            TextField {
+                id: accUser
+                Layout.fillWidth: true
+                placeholderText: "Username (usually full email)"
+                selectByMouse: true
+            }
+            TextField {
+                id: accPass
+                Layout.fillWidth: true
+                placeholderText: "Password / App Password"
+                echoMode: TextInput.Password
+                selectByMouse: true
             }
         }
     }

@@ -1,15 +1,147 @@
 #include "backend.h"
 
 #include <QDateTime>
+#include <QDir>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QMetaObject>
+#include <QStandardPaths>
 #include <QTimer>
 
+static Backend *s_backendInstance = nullptr;
+
+static void coreEventCallback(const char *event_json) {
+    if (s_backendInstance && event_json) {
+        const QString jsonStr = QString::fromUtf8(event_json);
+        QMetaObject::invokeMethod(s_backendInstance, [jsonStr]() {
+            s_backendInstance->onCoreEvent(jsonStr);
+        }, Qt::QueuedConnection);
+    }
+}
+
 Backend::Backend(QObject *parent) : QObject(parent) {
+    s_backendInstance = this;
+
+    const QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(dataDir);
+    const QString dbPath = dataDir + "/gist.db";
+
+    m_coreEngine = gist_core_new(dbPath.toUtf8().constData());
+    if (m_coreEngine) {
+        gist_core_set_callback(m_coreEngine, coreEventCallback);
+    }
+
     m_accounts = {
         QVariantMap{{"id", "personal"}, {"name", "Personal"}, {"email", "user@omarchy.org"}, {"color", "#FFD60A"}},
         QVariantMap{{"id", "work"}, {"name", "Work"}, {"email", "alen@work.io"}, {"color", "#64D2FF"}}
     };
+
     initSampleData();
+    loadFromCore();
     updateCurrentThread();
+}
+
+Backend::~Backend() {
+    if (m_coreEngine) {
+        gist_core_free(m_coreEngine);
+        m_coreEngine = nullptr;
+    }
+    if (s_backendInstance == this) {
+        s_backendInstance = nullptr;
+    }
+}
+
+void Backend::addAccount(const QString &id, const QString &name, const QString &email,
+                         const QString &imapHost, int imapPort,
+                         const QString &username, const QString &password) {
+    if (!m_coreEngine) return;
+
+    gist_core_add_account(
+        m_coreEngine,
+        id.toUtf8().constData(),
+        name.toUtf8().constData(),
+        email.toUtf8().constData(),
+        imapHost.toUtf8().constData(),
+        static_cast<uint16_t>(imapPort),
+        username.toUtf8().constData(),
+        password.toUtf8().constData()
+    );
+
+    QVariantMap acc;
+    acc["id"] = id;
+    acc["name"] = name;
+    acc["email"] = email;
+    acc["color"] = "#34C759";
+    m_accounts.append(acc);
+    emit accountsChanged();
+
+    m_statusMessage = QString("Account %1 added. Starting sync...").arg(email);
+    emit statusMessageChanged();
+    syncAccount(id);
+}
+
+void Backend::syncAccount(const QString &accountId) {
+    if (!m_coreEngine) return;
+    m_isSyncing = true;
+    emit isSyncingChanged();
+
+    m_statusMessage = "Syncing mail with IMAP server...";
+    emit statusMessageChanged();
+
+    gist_core_sync_account(m_coreEngine, accountId.toUtf8().constData());
+}
+
+void Backend::onCoreEvent(const QString &eventJson) {
+    const auto doc = QJsonDocument::fromJson(eventJson.toUtf8());
+    const auto obj = doc.object();
+    const QString event = obj.value("event").toString();
+
+    m_isSyncing = false;
+    emit isSyncingChanged();
+
+    if (event == "sync_finished") {
+        const int synced = obj.value("synced").toInt();
+        m_statusMessage = QString("Sync complete. %1 new messages.").arg(synced);
+        emit statusMessageChanged();
+        loadFromCore();
+    } else if (event == "sync_error") {
+        m_statusMessage = QString("Sync failed: %1").arg(obj.value("error").toString());
+        emit statusMessageChanged();
+    }
+}
+
+void Backend::loadFromCore() {
+    if (!m_coreEngine) return;
+
+    char *jsonStr = gist_core_get_messages_json(m_coreEngine, m_activeFolder.toUtf8().constData());
+    if (jsonStr) {
+        const auto doc = QJsonDocument::fromJson(QByteArray(jsonStr));
+        gist_core_free_string(jsonStr);
+
+        if (doc.isArray() && !doc.array().isEmpty()) {
+            m_emails.clear();
+            const auto arr = doc.array();
+            for (const auto &v : arr) {
+                const auto o = v.toObject();
+                EmailItem item;
+                item.id = o.value("id").toString();
+                item.senderName = o.value("sender_name").toString();
+                item.senderEmail = o.value("sender_email").toString();
+                item.subject = o.value("subject").toString();
+                item.snippet = o.value("snippet").toString();
+                item.body = o.value("body").toString();
+                item.date = o.value("date").toString();
+                item.folder = o.value("folder").toString();
+                item.isUnread = o.value("is_unread").toBool();
+                item.isStarred = o.value("is_starred").toBool();
+                item.summary = o.value("summary").toString();
+                m_emails.append(item);
+            }
+            emit threadsChanged();
+            updateCurrentThread();
+        }
+    }
 }
 
 void Backend::initSampleData() {
@@ -200,6 +332,7 @@ void Backend::selectFolder(const QString &folder) {
     m_activeFolder = folder;
     m_selectedThreadIndex = 0;
     emit activeFolderChanged();
+    loadFromCore();
     emit threadsChanged();
     updateCurrentThread();
 }
@@ -275,7 +408,6 @@ void Backend::deleteCurrent() {
 }
 
 void Backend::primaryAction() {
-    // Primary action: Get the Gist (AI summary)
     const auto items = filteredItems();
     if (items.isEmpty() || m_selectedThreadIndex < 0 || m_selectedThreadIndex >= items.size())
         return;
@@ -285,7 +417,6 @@ void Backend::primaryAction() {
     emit isAiBusyChanged();
     emit aiDrawerOpenChanged();
 
-    // Fast asynchronous AI synthesis
     QTimer::singleShot(250, this, [this]() {
         const auto items = filteredItems();
         if (m_selectedThreadIndex >= 0 && m_selectedThreadIndex < items.size()) {
@@ -349,9 +480,12 @@ void Backend::askAi(const QString &prompt) {
 }
 
 void Backend::refresh() {
-    m_statusMessage = "All mailboxes up to date";
+    m_statusMessage = "Syncing mail with IMAP engine...";
     emit statusMessageChanged();
-    emit threadsChanged();
+    if (!m_accounts.isEmpty()) {
+        const QString firstAccId = m_accounts.first().toMap().value("id").toString();
+        syncAccount(firstAccId);
+    }
 }
 
 void Backend::updateCurrentThread() {

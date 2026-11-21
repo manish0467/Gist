@@ -7,6 +7,8 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include "gist_core.h"
+
 struct EmailItem {
     QString id;
     QString senderName;
@@ -36,9 +38,11 @@ class Backend : public QObject {
     Q_PROPERTY(QString aiDraft READ aiDraft NOTIFY aiDraftChanged)
     Q_PROPERTY(bool aiDrawerOpen READ aiDrawerOpen WRITE setAiDrawerOpen NOTIFY aiDrawerOpenChanged)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
+    Q_PROPERTY(bool isSyncing READ isSyncing NOTIFY isSyncingChanged)
 
 public:
     explicit Backend(QObject *parent = nullptr);
+    ~Backend() override;
 
     QString activeFolder() const { return m_activeFolder; }
     int unreadCount() const;
@@ -55,6 +59,7 @@ public:
     bool aiDrawerOpen() const { return m_aiDrawerOpen; }
     void setAiDrawerOpen(bool open);
     QString statusMessage() const { return m_statusMessage; }
+    bool isSyncing() const { return m_isSyncing; }
 
     Q_INVOKABLE void selectFolder(const QString &folder);
     Q_INVOKABLE void selectThread(int index);
@@ -64,10 +69,17 @@ public:
     Q_INVOKABLE void toggleReadCurrent();
     Q_INVOKABLE void archiveCurrent();
     Q_INVOKABLE void deleteCurrent();
-    Q_INVOKABLE void primaryAction(); // Trigger AI Gist summary
+    Q_INVOKABLE void primaryAction();
     Q_INVOKABLE void generateReply(const QString &tone);
     Q_INVOKABLE void askAi(const QString &prompt);
     Q_INVOKABLE void refresh();
+
+    // Live IMAP Core Integration
+    Q_INVOKABLE void addAccount(const QString &id, const QString &name, const QString &email,
+                                const QString &imapHost, int imapPort,
+                                const QString &username, const QString &password);
+    Q_INVOKABLE void syncAccount(const QString &accountId);
+    void onCoreEvent(const QString &eventJson);
 
 signals:
     void activeFolderChanged();
@@ -81,16 +93,20 @@ signals:
     void aiDraftChanged();
     void aiDrawerOpenChanged();
     void statusMessageChanged();
+    void isSyncingChanged();
 
 private:
     void initSampleData();
+    void loadFromCore();
     QList<EmailItem*> filteredItems() const;
     void updateCurrentThread();
 
+    GistEngine *m_coreEngine = nullptr;
     QString m_activeFolder = "inbox";
     QString m_searchQuery;
     int m_selectedThreadIndex = 0;
     bool m_isAiBusy = false;
+    bool m_isSyncing = false;
     QString m_aiSummary;
     QString m_aiDraft;
     bool m_aiDrawerOpen = false;
