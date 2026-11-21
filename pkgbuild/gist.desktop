@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Gist
+Comment=Native fast AI email client
+Exec=gist %f
+Icon=gist
+Terminal=false
+Categories=Network;Email;Utility;
+StartupWMClass=gist

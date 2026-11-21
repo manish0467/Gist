@@ -1,0 +1,22 @@
+pkgname=gist
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Native fast AI-augmented email client for Omarchy and Arch Linux'
+arch=('x86_64' 'aarch64')
+license=('MIT')
+depends=('qt6-base' 'qt6-declarative' 'qt6-quickcontrols2' 'qt6-wayland')
+makedepends=('gcc' 'make')
+source=()
+sha256sums=()
+
+build() {
+  cd "$startdir/.."
+  ./bin/build
+}
+
+package() {
+  cd "$startdir/.."
+  install -Dm755 build/gist "$pkgdir/usr/bin/gist"
+  install -Dm644 pkgbuild/gist.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/gist.svg"
+  install -Dm644 pkgbuild/gist.desktop "$pkgdir/usr/share/applications/gist.desktop"
+}
